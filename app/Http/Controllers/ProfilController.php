@@ -2,13 +2,11 @@
 
 namespace App\Http\Controllers;
 
-
 use App\Models\Users;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
-
 
 class ProfilController extends Controller
 {
@@ -23,16 +21,16 @@ class ProfilController extends Controller
     public function update(Request $request)
     {
         $request->validate([
-            'nama' => 'required|string|max:100',
+            'nama'  => 'required|string|max:100',
             'email' => 'required|email|unique:users,email,' . auth()->user()->id_user . ',id_user',
-            'nip' => 'nullable|unique:users,nip,' . auth()->user()->id_user . ',id_user',
+            'nip'   => 'nullable|unique:users,nip,' . auth()->user()->id_user . ',id_user',
         ]);
 
         $user = Users::find(auth()->user()->id_user);
         $user->update([
-            'nama' => $request->nama,
+            'nama'  => $request->nama,
             'email' => $request->email,
-            'nip' => $request->nip,
+            'nip'   => $request->nip,
         ]);
 
         return back()->with('success', 'Profil berhasil diperbarui!');
@@ -48,12 +46,10 @@ class ProfilController extends Controller
 
         $user = auth()->user();
 
-        // Cek password lama
         if (!Hash::check($request->password_lama, $user->password)) {
             return back()->with('error', 'Password lama tidak sesuai!');
         }
 
-        // Update password
         Users::find($user->id_user)->update([
             'password' => Hash::make($request->password_baru)
         ]);
@@ -70,21 +66,19 @@ class ProfilController extends Controller
 
         $user = Users::find(auth()->user()->id_user);
 
-        // Hapus foto lama jika ada
-        if ($user->foto && Storage::exists('public/profil/' . $user->foto)) {
-            Storage::delete('public/profil/' . $user->foto);
+        // Hapus foto lama
+        if ($user->foto && file_exists(public_path('fotoprofil/' . $user->foto))) {
+            unlink(public_path('fotoprofil/' . $user->foto));
         }
 
-        // Upload foto baru
-        $file = $request->file('foto');
+        $file     = $request->file('foto');
         $filename = time() . '_' . $user->id_user . '.' . $file->getClientOriginalExtension();
-        $file->storeAs('public/profil', $filename);
 
-        // Update database
-        $user->update([
-            'foto' => $filename
-        ]);
+        $file->move(public_path('fotoprofil'), $filename);
+
+        $user->update(['foto' => $filename]);
 
         return back()->with('success', 'Foto profil berhasil diperbarui!');
     }
-}
+
+} // ✅ tutup class

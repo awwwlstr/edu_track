@@ -166,10 +166,21 @@
                     <span class="link-icon"><i class="fas fa-user-cog"></i></span>
                     <span class="link-text">Profil</span>
                 </a>
+
             </nav>
 
             {{-- Sidebar footer --}}
             <div class="sidebar-footer">
+                <form action="/logout" method="POST" class="w-100 m-0">
+                    @csrf
+                    <button type="submit" class="sidebar-link logout-btn">
+                        <span class="link-icon">
+                            <i class="fas fa-sign-out-alt"></i>
+                        </span>
+                        <span class="link-text">Logout</span>
+                    </button>
+                </form>
+
                 <div class="sidebar-clock-box">
                     <div id="sidebarTime" class="sb-time">--:--:--</div>
                     <div id="sidebarDate" class="sb-date">-- --- ----</div>

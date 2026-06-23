@@ -42,7 +42,7 @@
 
                 {{-- Avatar --}}
                 @if(isset($user->foto) && $user->foto)
-                    <img src="{{ asset('storage/profil/' . $user->foto) }}"
+                    <img src="{{ asset('fotoprofil/' . $user->foto)}}"
                          class="rounded-circle"
                          style="width:100px;height:100px;object-fit:cover;border:3px solid var(--jade-soft);"
                          alt="Foto Profil"

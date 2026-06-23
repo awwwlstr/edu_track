@@ -114,7 +114,7 @@
                     @error('password')<small class="text-danger">{{ $message }}</small>@enderror
                 </div>
 
-                <button type="button" class="btn btn-primary btn-register w-100" onclick="submitRegister()">
+                <button type="button" onclick="submitRegister()" class="btn btn-primary w-100">
                     <i class="fas fa-user-plus me-2"></i> Daftar Sekarang
                 </button>
             </form>
@@ -130,13 +130,11 @@
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-const PYTHON_API = 'http://127.0.0.1:5000';
-let stream       = null;
+const PYTHON_API     = 'http://127.0.0.1:5000';
+let stream           = null;
 let fotoSudahDiambil = false;
 
-// ── Kamera ────────────────────────────────────
 async function bukaKamera() {
     try {
         stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
@@ -147,7 +145,7 @@ async function bukaKamera() {
         document.getElementById('fotoPreview').style.display     = 'none';
         document.getElementById('btnAmbilFoto').style.display    = 'inline-block';
         document.getElementById('btnUlang').style.display        = 'none';
-        setStatusWajah('info', '📷 Posisikan wajah Anda lalu klik Ambil Foto');
+        setStatusWajah('info', '📷 Posisikan wajah lalu klik Ambil Foto');
         fotoSudahDiambil = false;
     } catch(e) {
         setStatusWajah('danger', '❌ Gagal akses kamera: ' + e.message);
@@ -164,72 +162,75 @@ function ambilFoto() {
     canvas.getContext('2d').drawImage(video, 0, 0);
 
     const base64 = canvas.toDataURL('image/jpeg', 0.9);
-    document.getElementById('fotoBase64').value  = base64.split(',')[1];
-    document.getElementById('fotoPreview').src   = base64;
+    document.getElementById('fotoBase64').value           = base64;
+    document.getElementById('fotoPreview').src            = base64;
     document.getElementById('fotoPreview').style.display  = 'block';
     document.getElementById('wajahPreview').style.display = 'none';
     document.getElementById('btnAmbilFoto').style.display = 'none';
     document.getElementById('btnUlang').style.display     = 'inline-block';
 
-    // stop kamera
     if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
 
-    setStatusWajah('success', '✅ Foto wajah berhasil diambil');
+    setStatusWajah('success', '✅ Foto berhasil diambil, silakan lengkapi form lalu daftar');
     fotoSudahDiambil = true;
 }
 
 function ulangi() {
-    document.getElementById('fotoBase64').value          = '';
-    document.getElementById('fotoPreview').style.display = 'none';
-    document.getElementById('btnUlang').style.display    = 'none';
+    document.getElementById('fotoBase64').value              = '';
+    document.getElementById('fotoPreview').style.display     = 'none';
+    document.getElementById('btnUlang').style.display        = 'none';
     document.getElementById('facePlaceholder').style.display = 'block';
     setStatusWajah('warning', '⚠️ Foto wajah belum diambil');
     fotoSudahDiambil = false;
 }
 
-// ── Submit ────────────────────────────────────
 async function submitRegister() {
-    if (!fotoSudahDiambil) {
-        setStatusWajah('danger', '❌ Harap ambil foto wajah terlebih dahulu!');
+    if (!document.getElementById('formRegister').checkValidity()) {
+        alert("Lengkapi form dulu");
         return;
     }
 
-    const nip    = document.getElementById('inputNip').value.trim();
-    const foto   = document.getElementById('fotoBase64').value;
+    if (!fotoSudahDiambil) {
+        setStatusWajah('danger', '❌ Ambil foto wajah dulu!');
+        return;
+    }
 
-    // Daftarkan wajah ke Python API dulu
-    setStatusWajah('info', '⏳ Mendaftarkan wajah ke sistem...');
+    const nip  = document.getElementById('inputNip').value.trim();
+    const foto = document.getElementById('fotoBase64').value;
+
+    setStatusWajah('info', '⏳ Mendaftarkan wajah...');
+
     try {
-        const res  = await fetch(PYTHON_API + '/face/register', {
+        const res  = await fetch(PYTHON_API + '/face/register-simple', {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify({
-                frame:           foto,
-                user_id:         nip,
-                liveness_passed: true
+                frame:   foto.split(',')[1],
+                user_id: nip
             })
         });
+
         const data = await res.json();
+        console.log('Response:', data);
+
         if (!data.success) {
-            setStatusWajah('danger', '❌ Gagal daftarkan wajah: ' + data.message);
+            setStatusWajah('danger', '❌ ' + (data.message || data.error));
             return;
         }
+
         setStatusWajah('success', '✅ Wajah terdaftar! Menyimpan akun...');
+
     } catch(e) {
-        setStatusWajah('danger', '❌ Gagal konek ke Python API: ' + e.message);
+        setStatusWajah('danger', '❌ Gagal konek Python API: ' + e.message);
         return;
     }
 
-    // Submit form ke Laravel
     document.getElementById('formRegister').submit();
 }
 
 function setStatusWajah(type, msg) {
     const el = document.getElementById('statusWajah');
-    const map = { info:'info', success:'success', danger:'danger', warning:'warning' };
-    el.className = 'alert alert-' + (map[type]||'info') + ' py-2 small mb-2';
+    el.className = 'alert alert-' + type + ' py-2 small mb-2';
     el.innerHTML = msg;
 }
 </script>
-</body>
-</html>

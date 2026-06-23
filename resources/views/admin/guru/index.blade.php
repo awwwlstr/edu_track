@@ -62,7 +62,7 @@
                     </td>
                     <td>
                         @if($item->foto)
-                            <img src="{{ asset('storage/profil/' . $item->foto) }}"
+                            <img src="{{ asset('fotoprofil/' . $item->foto) }}"
                                  class="rounded-circle"
                                  style="width:40px;height:40px;object-fit:cover;border:2px solid var(--jade-soft);"
                                  alt="Foto"

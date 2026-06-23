@@ -9,142 +9,199 @@
     $tanggalAwal = Carbon::parse($bulan . '-01');
     $jumlahHari  = $tanggalAwal->daysInMonth;
     $hariPertama = $tanggalAwal->dayOfWeek;
-    // $hariBesar sudah dikirim dari controller
 @endphp
 
-<style>
-    .calendar-header,
-    .calendar-grid {
-        display: grid;
-        grid-template-columns: repeat(7, 1fr);
-        gap: 4px;
-    }
-    .calendar-header div {
-        text-align: center;
-        font-weight: bold;
-        padding: 10px 0;
-        border-bottom: 2px solid #ddd;
-    }
-    .calendar-header div:first-child { color: #dc3545; }
-    .calendar-header div:last-child  { color: #6c757d; }
-    .calendar-cell {
-        border: 1px solid #eaeaea;
-        min-height: 90px;
-        padding: 8px;
-        border-radius: 6px;
-        background: #f8f9fa;
-        text-align: center;
-    }
-    .calendar-cell .tanggal {
-        font-weight: bold;
-        margin-bottom: 4px;
-    }
-    .calendar-cell.hadir   { background: #198754; color: #fff; }
-    .calendar-cell.izin    { background: #ffc107; color: #000; }
-    .calendar-cell.alpha   { background: #dc3545; color: #fff; }
-    .calendar-cell.weekend { background: #dee2e6; color: #555; }
-    .calendar-cell.libur   { background: #f8d7da; color: #842029; border: 1px solid #f5c2c7; }
-    .calendar-cell.libur .tanggal { color: #842029; }
-    .libur-label {
-        font-size: 10px;
-        line-height: 1.2;
-        margin-top: 4px;
-        font-weight: 600;
-    }
-    .calendar-cell.empty {
-        background: transparent;
-        border: none;
-    }
-</style>
-
 <div class="container-fluid">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2>
-            <i class="fas fa-calendar-alt"></i>
-            Kalender Absensi - {{ $tanggalAwal->translatedFormat('F Y') }}
-        </h2>
+
+    {{-- Page Header --}}
+    <div class="page-header d-flex justify-content-between align-items-center">
         <div>
-            <a href="?bulan={{ $tanggalAwal->copy()->subMonth()->format('Y-m') }}" 
-               class="btn btn-outline-primary btn-sm">
+            <div class="page-title">
+                <i class="fas fa-calendar-alt me-2 text-green"></i>Kalender Absensi
+            </div>
+            <div class="page-subtitle">{{ $tanggalAwal->translatedFormat('F Y') }}</div>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="?bulan={{ $tanggalAwal->copy()->subMonth()->format('Y-m') }}"
+               class="btn btn-secondary btn-sm">
                 <i class="fas fa-chevron-left"></i> Sebelumnya
             </a>
-            <a href="?bulan={{ $tanggalAwal->copy()->addMonth()->format('Y-m') }}" 
-               class="btn btn-outline-primary btn-sm ms-2">
+            <a href="?bulan={{ $tanggalAwal->copy()->addMonth()->format('Y-m') }}"
+               class="btn btn-secondary btn-sm">
                 Berikutnya <i class="fas fa-chevron-right"></i>
             </a>
         </div>
     </div>
 
-    {{-- Header hari --}}
-    <div class="calendar-header">
-        <div>Min</div>
-        <div>Sen</div>
-        <div>Sel</div>
-        <div>Rab</div>
-        <div>Kam</div>
-        <div>Jum</div>
-        <div>Sab</div>
-    </div>
+    {{-- Kalender Card --}}
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="fas fa-calendar-alt me-2 text-green"></i>Kalender Absensi</span>
+            <span style="font-size:12px;color:var(--gray-400);font-weight:500;">
+                {{ $tanggalAwal->translatedFormat('F Y') }}
+            </span>
+        </div>
+        <div class="card-body p-3">
 
-    {{-- Kalender --}}
-    <div class="calendar-grid mt-2">
-        {{-- Kosong sebelum tanggal 1 --}}
-        @for ($i = 0; $i < $hariPertama; $i++)
-            <div class="calendar-cell empty"></div>
-        @endfor
-
-        {{-- Tanggal --}}
-        @for ($tgl = 1; $tgl <= $jumlahHari; $tgl++)
-            @php
-                $tanggalFull  = sprintf('%s-%02d', $bulan, $tgl);
-                $tanggalObj   = Carbon::parse($tanggalFull);
-                $dayOfWeek    = $tanggalObj->dayOfWeek;
-                $keyHariBesar = sprintf('%02d', $tgl);
-
-                $data      = $absensi[$tanggalFull] ?? null;
-                $isWeekend = in_array($dayOfWeek, [0, 6]);
-                $isLibur   = isset($hariBesar[$keyHariBesar]);
-                $namaLibur = $isLibur ? $hariBesar[$keyHariBesar] : '';
-
-                // Prioritas: absensi > libur > weekend
-                $kelas = '';
-                if ($data) {
-                    if ($data->status === 'hadir' || $data->status === 'terlambat') {
-                        $kelas = 'hadir';
-                    } elseif (in_array($data->status, ['izin', 'sakit'])) {
-                        $kelas = 'izin';
-                    } else {
-                        $kelas = 'alpha';
-                    }
-                } elseif ($isLibur) {
-                    $kelas = 'libur';
-                } elseif ($isWeekend) {
-                    $kelas = 'weekend';
-                }
-            @endphp
-
-            <div class="calendar-cell {{ $kelas }}">
-                <div class="tanggal">{{ $tgl }}</div>
-                @if($data)
-                    <small>{{ ucfirst($data->status) }}</small>
-                @elseif($isLibur)
-                    <div class="libur-label">🎉 {{ $namaLibur }}</div>
-                @elseif($isWeekend)
-                    <small>{{ $dayOfWeek == 0 ? 'Minggu' : 'Sabtu' }}</small>
-                @endif
+            {{-- Header Hari --}}
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;margin-bottom:4px;">
+                @foreach(['Min','Sen','Sel','Rab','Kam','Jum','Sab'] as $i => $hari)
+                    <div style="
+                        font-size:11px;
+                        font-weight:700;
+                        text-transform:uppercase;
+                        letter-spacing:0.5px;
+                        padding:6px 0;
+                    ">{{ $hari }}</div>
+                @endforeach
             </div>
-        @endfor
+
+            {{-- Grid Kalender --}}
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;margin-top:4px;">
+
+                {{-- Kosong sebelum tanggal 1 --}}
+                @for ($i = 0; $i < $hariPertama; $i++)
+                    <div></div>
+                @endfor
+
+                {{-- Tanggal --}}
+                @for ($tgl = 1; $tgl <= $jumlahHari; $tgl++)
+                    @php
+                        $tanggalFull  = sprintf('%s-%02d', $bulan, $tgl);
+                        $tanggalObj   = Carbon::parse($tanggalFull);
+                        $dayOfWeek    = $tanggalObj->dayOfWeek;
+                        $keyHariBesar = sprintf('%02d', $tgl);
+
+                        $data         = $absensi[$tanggalFull] ?? null;
+                        $isWeekend    = in_array($dayOfWeek, [0, 6]);
+                        $isLibur      = isset($hariBesar[$keyHariBesar]);
+                        $namaLibur    = $isLibur ? $hariBesar[$keyHariBesar] : '';
+                        $isToday      = $tanggalObj->isToday();
+
+                        // Warna berdasarkan status
+                        if ($data) {
+                            if (in_array($data->status, ['hadir', 'terlambat'])) {
+                                $bg       = 'var(--green-100)';
+                                $color    = 'var(--green-800)';
+                                $dotColor = 'var(--color-hadir)';
+                                $label    = ucfirst($data->status);
+                            } elseif ($data->status === 'izin') {
+                                $bg       = '#fef9c3';
+                                $color    = '#854d0e';
+                                $dotColor = 'var(--color-izin)';
+                                $label    = 'Izin';
+                            } elseif ($data->status === 'sakit') {
+                                $bg       = '#e0f2fe';
+                                $color    = '#075985';
+                                $dotColor = 'var(--color-sakit)';
+                                $label    = 'Sakit';
+                            } else {
+                                $bg       = '#fee2e2';
+                                $color    = '#991b1b';
+                                $dotColor = 'var(--color-alpha)';
+                                $label    = 'Alpha';
+                            }
+                        } elseif ($isLibur) {
+                            $bg       = 'var(--green-50)';
+                            $color    = 'var(--green-700)';
+                            $dotColor = 'var(--green-400)';
+                            $label    = $namaLibur;
+                        } elseif ($isWeekend) {
+                            $bg       = 'var(--gray-100)';
+                            $color    = 'var(--gray-400)';
+                            $dotColor = 'var(--gray-300)';
+                            $label    = $dayOfWeek == 0 ? 'Minggu' : 'Sabtu';
+                        } else {
+                            $bg       = '#fff';
+                            $color    = 'var(--gray-700)';
+                            $dotColor = '';
+                            $label    = '';
+                        }
+
+                        // Today override
+                        if ($isToday && !$data) {
+                            $bg    = 'var(--green-600)';
+                            $color = '#fff';
+                        }
+                    @endphp
+
+                    <div style="
+                        background: {{ $bg }};
+                        color: {{ $color }};
+                        border-radius: var(--radius-md);
+                        border: 1px solid {{ $isToday && !$data ? 'var(--green-600)' : 'var(--gray-100)' }};
+                        min-height: 64px;
+                        padding: 6px 4px;
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        justify-content: flex-start;
+                        gap: 3px;
+                        font-size: 12px;
+                        transition: box-shadow var(--dur) var(--ease), transform var(--dur) var(--ease);
+                        cursor: default;
+                        box-shadow: var(--shadow-sm);
+                    "
+                    onmouseenter="this.style.boxShadow='var(--shadow-md)';this.style.transform='translateY(-1px)'"
+                    onmouseleave="this.style.boxShadow='var(--shadow-sm)';this.style.transform='translateY(0)'">
+
+                        {{-- Nomor tanggal --}}
+                        <span style="
+                            font-weight:700;
+                            font-size:13px;
+                            font-family:'DM Mono',monospace;
+                            line-height:1;
+                        ">{{ $tgl }}</span>
+
+                        {{-- Label status --}}
+                        @if($data)
+                            <span class="badge-status" style="
+                                background:{{ $bg }};
+                                color:{{ $color }};
+                                font-size:9px;
+                                padding:2px 5px;
+                                border-radius:20px;
+                                font-weight:600;
+                                border:1px solid {{ $color }};
+                                opacity:0.85;
+                            ">{{ $label }}</span>
+                        @elseif($isLibur)
+                            <span style="font-size:9px;font-weight:600;line-height:1.2;text-align:center;word-break:break-word;">
+                                🎉 {{ Str::limit($namaLibur, 12) }}
+                            </span>
+                        @elseif($isWeekend)
+                            <span style="font-size:9px;color:var(--gray-400);">{{ $label }}</span>
+                        @endif
+
+                    </div>
+                @endfor
+
+            </div>
+
+            {{-- Keterangan --}}
+            <div class="mt-3 pt-3 d-flex gap-2 flex-wrap" style="border-top:1px solid var(--gray-100);">
+                <span class="badge-status badge-hadir" style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;">
+                    <i class="fas fa-circle me-1" style="font-size:7px;color:var(--color-hadir);"></i>Hadir / Terlambat
+                </span>
+                <span class="badge-status badge-izin" style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;">
+                    <i class="fas fa-circle me-1" style="font-size:7px;color:var(--color-izin);"></i>Izin
+                </span>
+                <span class="badge-status badge-sakit" style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;">
+                    <i class="fas fa-circle me-1" style="font-size:7px;color:var(--color-sakit);"></i>Sakit
+                </span>
+                <span class="badge-status badge-alpha" style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;">
+                    <i class="fas fa-circle me-1" style="font-size:7px;color:var(--color-alpha);"></i>Alpha
+                </span>
+                <span class="badge-status" style="background:var(--gray-100);color:var(--gray-500);padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;">
+                    <i class="fas fa-circle me-1" style="font-size:7px;color:var(--gray-300);"></i>Sabtu / Minggu
+                </span>
+                <span class="badge-status" style="background:var(--green-50);color:var(--green-700);padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;">
+                    🎉 Hari Besar
+                </span>
+            </div>
+
+        </div>
     </div>
 
-    {{-- Keterangan warna --}}
-    <div class="mt-4 d-flex gap-2 flex-wrap">
-        <span class="badge bg-success">Hadir / Terlambat</span>
-        <span class="badge bg-warning text-dark">Izin / Sakit</span>
-        <span class="badge bg-danger">Alpha</span>
-        <span class="badge bg-secondary">Sabtu / Minggu</span>
-        <span class="badge" style="background:#f8d7da; color:#842029; border:1px solid #f5c2c7">
-            Hari Besar
-        </span>
-    </div>
 </div>
 @endsection

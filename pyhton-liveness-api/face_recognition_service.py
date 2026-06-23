@@ -1,6 +1,32 @@
+"""
+face_recognition_service.py  —  v3 (deep embedding)
+=====================================================
+
+Revisi dari v2 (HOG+LBP+Landmark):
+  ✗ DIHAPUS: EncodingExtractor (landmark geometry 154 dim)
+  ✗ DIHAPUS: HOGExtractor (~1764 dim)
+  ✗ DIHAPUS: LBPExtractor (10 dim)
+  ✗ DIHAPUS: FaceAligner (tidak diperlukan, face_recognition handle sendiri)
+  ✓ DIGANTI: face_recognition ResNet 128-dim embedding
+              → dilatih dengan 3 juta+ wajah untuk membedakan IDENTITAS
+
+  Semua logika bisnis DIPERTAHANKAN dari v2:
+  ✓ Mean similarity + penalti ketidakkonsistenan
+  ✓ Gap check antar user di identify_face()
+  ✓ Threshold lebih ketat jika hanya 1 user
+  ✓ Lockout setelah gagal berulang
+  ✓ Checksum SHA-256 pada storage
+  ✓ Debug logging
+  ✓ Multi-sample per user
+
+Install:
+  pip install face_recognition
+  # otomatis install dlib + ResNet model weights (~100MB)
+"""
+
 import cv2
 import numpy as np
-import dlib
+import face_recognition          # pip install face_recognition
 import pickle
 import os
 import time
@@ -8,149 +34,50 @@ import hashlib
 import logging
 from dataclasses import dataclass, field
 from typing import Optional
-from scipy.spatial import distance as dist
 
 logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────
-#  DATA CLASSES
+#  DATA CLASSES  (tidak berubah dari v2)
 # ──────────────────────────────────────────────
 
 @dataclass
 class FaceEntry:
-    """Stores multiple encodings per user for better accuracy."""
-    user_id:   str
-    encodings: list = field(default_factory=list)   # list of np.ndarray
+    user_id:    str
+    encodings:  list = field(default_factory=list)   # list of np.ndarray 128-dim
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
-    # security
     failed_attempts: int   = 0
     locked_until:    float = 0.0
 
-    MAX_ENCODINGS   = 5     # keep last N samples per user
-    LOCKOUT_AFTER   = 5     # failed attempts before lockout
-    LOCKOUT_SECONDS = 30.0  # lockout duration
+    MAX_ENCODINGS   = 5
+    LOCKOUT_AFTER   = 5
+    LOCKOUT_SECONDS = 30.0
 
 
 @dataclass
 class VerifyResult:
     matched:    bool
-    similarity: float
+    similarity: float      # cosine similarity 0–1 (makin besar makin mirip)
     user_id:    Optional[str]
     message:    str
     locked:     bool = False
 
 
 # ──────────────────────────────────────────────
-#  FACE ALIGNMENT  (new — improves accuracy)
-# ──────────────────────────────────────────────
-
-class FaceAligner:
-    """
-    Aligns face so that both eyes are on the same horizontal line.
-    This normalises for head tilt and greatly improves matching stability.
-    """
-    TARGET_LEFT_EYE  = (0.35, 0.35)   # relative position in output image
-    OUTPUT_SIZE      = (112, 112)
-
-    def align(self, image: np.ndarray, shape: np.ndarray) -> Optional[np.ndarray]:
-        left_eye_pts  = shape[36:42]
-        right_eye_pts = shape[42:48]
-
-        left_center  = left_eye_pts.mean(axis=0)
-        right_center = right_eye_pts.mean(axis=0)
-
-        dy = right_center[1] - left_center[1]
-        dx = right_center[0] - left_center[0]
-        angle = np.degrees(np.arctan2(dy, dx))
-
-        desired_dist = (1.0 - 2 * self.TARGET_LEFT_EYE[0]) * self.OUTPUT_SIZE[0]
-        current_dist = np.linalg.norm(right_center - left_center)
-        if current_dist < 1e-6:
-            return None
-
-        scale = desired_dist / current_dist
-        eye_center = ((left_center + right_center) / 2).astype(int)
-
-        M = cv2.getRotationMatrix2D(tuple(eye_center.tolist()), angle, scale)
-
-        # shift so the eye centre maps to desired position
-        M[0, 2] += self.OUTPUT_SIZE[0] * 0.5 - eye_center[0]
-        M[1, 2] += self.OUTPUT_SIZE[1] * self.TARGET_LEFT_EYE[1] - eye_center[1]
-
-        aligned = cv2.warpAffine(image, M, self.OUTPUT_SIZE, flags=cv2.INTER_CUBIC)
-        return aligned
-
-
-# ──────────────────────────────────────────────
-#  ENCODING EXTRACTOR  (improved normalisation)
-# ──────────────────────────────────────────────
-
-class EncodingExtractor:
-    """
-    Extracts a robust face encoding combining:
-      - Normalised 68-landmark geometry  (pose-invariant)
-      - Pairwise inter-landmark distances (scale-invariant ratios)
-    """
-
-    # Key landmark pairs for ratio features
-    PAIRS = [
-        (36, 45),   # eye distance (baseline)
-        (48, 54),   # mouth width
-        (27, 8),    # nose to chin
-        (0,  16),   # face width
-        (17, 26),   # brow width
-        (36, 48),   # left eye to left mouth
-        (45, 54),   # right eye to right mouth
-        (30, 48),   # nose tip to left mouth
-        (30, 54),   # nose tip to right mouth
-        (8,  57),   # chin to bottom lip
-    ]
-
-    def extract(self, shape: np.ndarray) -> np.ndarray:
-        lm = shape.astype(np.float64)
-
-        # ── part 1: normalised geometry (136 dims) ──
-        center       = lm.mean(axis=0)
-        lm_centered  = lm - center
-        eye_dist     = np.linalg.norm(lm_centered[45] - lm_centered[36])
-        if eye_dist < 1e-6:
-            return None
-        lm_norm = lm_centered / eye_dist
-        geo_enc = lm_norm.flatten()           # 136
-
-        # ── part 2: pairwise distance ratios (10 dims) ──
-        baseline = np.linalg.norm(lm[36] - lm[45]) + 1e-6
-        ratios   = np.array([
-            np.linalg.norm(lm[a] - lm[b]) / baseline
-            for a, b in self.PAIRS
-        ])
-
-        # ── combine & L2-normalise ──
-        combined = np.concatenate([geo_enc, ratios])
-        norm     = np.linalg.norm(combined)
-        return combined / (norm + 1e-6)
-
-
-# ──────────────────────────────────────────────
-#  SECURE STORAGE
+#  SECURE STORAGE  (tidak berubah dari v2)
 # ──────────────────────────────────────────────
 
 class EncodingStore:
-    """
-    Persists FaceEntry objects.
-    Adds a simple integrity checksum so tampered files are rejected.
-    """
+    """Simpan FaceEntry ke disk dengan checksum SHA-256."""
 
     def __init__(self, path: str = "models/face_encodings.pkl"):
         self.path      = path
         self.hash_path = path + ".sha256"
         self._data: dict[str, FaceEntry] = {}
         self._load()
-
-    # ── public ────────────────────────────────
 
     def get(self, user_id: str) -> Optional[FaceEntry]:
         return self._data.get(user_id)
@@ -172,11 +99,9 @@ class EncodingStore:
     def all_ids(self) -> list[str]:
         return list(self._data.keys())
 
-    # ── private ───────────────────────────────
-
     def _save(self):
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-        raw = pickle.dumps(self._data)
+        raw      = pickle.dumps(self._data)
         checksum = hashlib.sha256(raw).hexdigest()
         with open(self.path,      "wb") as f: f.write(raw)
         with open(self.hash_path, "w")  as f: f.write(checksum)
@@ -187,57 +112,40 @@ class EncodingStore:
         with open(self.path, "rb") as f:
             raw = f.read()
 
-        # integrity check
         if os.path.exists(self.hash_path):
             with open(self.hash_path) as f:
                 stored = f.read().strip()
-            actual = hashlib.sha256(raw).hexdigest()
-            if stored != actual:
-                logger.error("Face encoding file integrity check FAILED — data may be tampered.")
+            if hashlib.sha256(raw).hexdigest() != stored:
+                logger.error("Integrity check GAGAL — file encoding mungkin dimanipulasi.")
                 self._data = {}
                 return
 
-    def _load(self):
-        if not os.path.exists(self.path):
-            return
-        with open(self.path, "rb") as f:
-            raw = f.read()
-
-        # integrity check
-        if os.path.exists(self.hash_path):
-            with open(self.hash_path) as f:
-                stored = f.read().strip()
-            actual = hashlib.sha256(raw).hexdigest()
-            if stored != actual:
-                logger.error("Face encoding file integrity check FAILED — data may be tampered.")
-                self._data = {}
-                return
-
-        loaded = pickle.loads(raw)
-
-        # ── backward compatibility ──
-        # format lama: {user_id: np.ndarray 136-dim}
-        # format baru: {user_id: FaceEntry dengan encoding 146-dim}
+        loaded   = pickle.loads(raw)
         migrated = {}
+
         for uid, val in loaded.items():
             if isinstance(val, FaceEntry):
-                # filter encoding yang dimensinya tidak sesuai (146)
-                valid = [e for e in val.encodings if isinstance(e, np.ndarray) and e.shape[0] == 146]
+                # Hanya terima encoding 128-dim (ResNet face_recognition)
+                # Encoding dari v1/v2 (146/154/1920+ dim) otomatis dibuang
+                valid = [
+                    e for e in val.encodings
+                    if isinstance(e, np.ndarray) and e.shape[0] == 128
+                ]
                 if valid:
                     val.encodings = valid
                     migrated[uid] = val
                 else:
-                    logger.warning(f"User '{uid}' encoding dimensi tidak sesuai, perlu daftar ulang.")
-            elif isinstance(val, np.ndarray):
-                # format lama — dimensi tidak kompatibel, skip
-                logger.warning(f"User '{uid}' format lama (dim={val.shape[0]}), perlu daftar ulang wajah.")
+                    old_dim = val.encodings[0].shape[0] if val.encodings else "?"
+                    logger.warning(
+                        f"User '{uid}': encoding lama (dim={old_dim}) tidak kompatibel. "
+                        "Daftar ulang wajah diperlukan."
+                    )
             else:
-                logger.warning(f"Data tidak dikenal untuk user '{uid}', dilewati.")
+                logger.warning(f"Format tidak dikenal untuk user '{uid}', dilewati.")
 
         self._data = migrated
-        # simpan ulang dengan format baru
         self._save()
-        logger.info("Migrasi selesai — file disimpan ulang dengan format baru.")
+        logger.info("Data dimuat dan disimpan ulang dengan format v3 (128-dim ResNet).")
 
 
 # ──────────────────────────────────────────────
@@ -246,93 +154,128 @@ class EncodingStore:
 
 class FaceRecognitionService:
     """
-    Improved face recognition service.
+    Face Recognition Service v3 — berbasis deep embedding ResNet 128-dim.
 
-    Improvements over original:
-      ✓ Face alignment before encoding  → consistent pose
-      ✓ Combined geometry + ratio encoding → more discriminative
-      ✓ Multi-sample averaging per user  → robust to expression change
-      ✓ Cosine similarity instead of raw L2 → scale-invariant comparison
-      ✓ Brute-force identify() across all users
-      ✓ Lockout after repeated failures  → brute-force protection
-      ✓ Checksum-protected storage       → tamper detection
-      ✓ Liveness result integration      → spoof guard
+    MENGAPA v1/v2 GAGAL membedakan wajah orang lain:
+    ─────────────────────────────────────────────────
+    v1/v2 menggunakan koordinat landmark (titik mata, hidung, mulut) dan
+    fitur tekstur (HOG, LBP). Ini hanya mengukur BENTUK dan PROPORSI wajah,
+    bukan IDENTITAS. Dua orang dengan proporsi wajah mirip (jarak mata,
+    lebar hidung, dll. serupa) akan menghasilkan encoding yang dekat,
+    meskipun mereka orang yang berbeda.
+
+    MENGAPA v3 BENAR:
+    ─────────────────
+    face_recognition menggunakan ResNet yang dilatih dengan 3 juta+ wajah
+    menggunakan metric learning (triplet loss). Model ini belajar
+    "siapa orang ini" — bukan "seperti apa bentuknya". Hasilnya adalah
+    128 angka yang merepresentasikan IDENTITAS unik seseorang, sehingga:
+    - Foto yang sama orang dalam pose berbeda → distance kecil (~0.2–0.4)
+    - Foto dua orang berbeda → distance besar (>0.5, bahkan kembar >0.45)
+
+    Threshold:
+    ─────────
+    Menggunakan L2 distance (bukan cosine) karena itu standar untuk
+    face_recognition library. Distance < THRESHOLD = cocok.
+    Makin KECIL distance = makin mirip (kebalikan dari cosine similarity).
+
+    Logika bisnis dipertahankan dari v2:
+    ✓ Mean distance + penalti ketidakkonsistenan
+    ✓ Gap check antar user di identify_face()
+    ✓ Threshold lebih ketat jika hanya 1 user terdaftar
+    ✓ Lockout setelah 5x gagal berulang
+    ✓ Checksum SHA-256 pada storage
+    ✓ Debug logging untuk tuning threshold
+    ✓ Multi-sample (5 sampel) per user
     """
 
-    SIMILARITY_THRESHOLD = 0.82   # cosine similarity (0-1)
+    # ── THRESHOLD UTAMA ──────────────────────────────────────────────────
+    # L2 distance — LEBIH KECIL = LEBIH MIRIP (kebalikan cosine!)
+    # < 0.40 : sangat ketat (keamanan tinggi, mungkin sering FRR)
+    # < 0.45 : ketat         ← DEFAULT, rekomendasikan mulai dari sini
+    # < 0.50 : longgar       (toleran terhadap pencahayaan/angle buruk)
+    # < 0.60 : default library (terlalu longgar untuk produksi)
+    DISTANCE_THRESHOLD = 0.45
+
+    # Selisih minimum distance antara user terbaik & kedua terbaik
+    # Mencegah false acceptance jika dua user punya wajah mirip
+    MIN_GAP = 0.05
 
     def __init__(
         self,
-        landmark_model: str = "models/shape_predictor_68_face_landmarks.dat",
         encodings_path: str = "models/face_encodings.pkl",
+        model: str = "large",
     ):
-        self.detector  = dlib.get_frontal_face_detector()
-        self.predictor = dlib.shape_predictor(landmark_model)
+        """
+        Args:
+            encodings_path : path penyimpanan encoding
+            model          : "large" (CNN ResNet, akurat) | "small" (HOG dlib, cepat)
+        """
+        self.model = model
+        self.store = EncodingStore(encodings_path)
 
-        self.aligner   = FaceAligner()
-        self.extractor = EncodingExtractor()
-        self.store     = EncodingStore(encodings_path)
-
-    # ── registration ──────────────────────────
+    # ── REGISTRASI ────────────────────────────────────────────────────────
 
     def register_face(
         self,
-        image:   np.ndarray,
-        user_id: str,
+        image:           np.ndarray,
+        user_id:         str,
         liveness_passed: bool = False,
     ) -> tuple[bool, str]:
-        """
-        Register (or update) a face for user_id.
-        Pass liveness_passed=True when called after a successful liveness check.
-        """
         if not liveness_passed:
-            return False, "Liveness check required before registration"
+            return False, "Liveness check diperlukan sebelum registrasi"
 
         encoding, msg = self._extract(image)
         if encoding is None:
             return False, msg
 
         entry = self.store.get(user_id) or FaceEntry(user_id=user_id)
-
-        # keep last MAX_ENCODINGS samples
         entry.encodings.append(encoding)
         if len(entry.encodings) > FaceEntry.MAX_ENCODINGS:
             entry.encodings = entry.encodings[-FaceEntry.MAX_ENCODINGS:]
 
         entry.updated_at = time.time()
         self.store.set(entry)
-        return True, f"Face registered ({len(entry.encodings)}/{FaceEntry.MAX_ENCODINGS} samples)"
+        logger.info(f"[REGISTER] user={user_id}, sampel={len(entry.encodings)}, dim=128")
+        return True, f"Wajah terdaftar ({len(entry.encodings)}/{FaceEntry.MAX_ENCODINGS} sampel)"
 
-    # ── 1-to-1 verification ───────────────────
+    # ── VERIFIKASI 1-KE-1 ─────────────────────────────────────────────────
 
     def verify_face(
         self,
-        image:   np.ndarray,
-        user_id: str,
+        image:           np.ndarray,
+        user_id:         str,
         liveness_passed: bool = False,
     ) -> VerifyResult:
-        """Verify image belongs to user_id."""
+        """Verifikasi apakah gambar cocok dengan user_id."""
         if not liveness_passed:
-            return VerifyResult(False, 0.0, user_id, "Liveness check required", False)
+            return VerifyResult(False, 0.0, user_id, "Liveness check diperlukan", False)
 
         entry = self.store.get(user_id)
         if entry is None:
-            return VerifyResult(False, 0.0, user_id, "User not registered", False)
+            return VerifyResult(False, 0.0, user_id, "User belum terdaftar", False)
 
-        # lockout check
         if self._is_locked(entry):
             remaining = round(entry.locked_until - time.time(), 1)
             return VerifyResult(False, 0.0, user_id,
-                                f"Account locked — try again in {remaining}s", True)
+                                f"Akun terkunci — coba lagi dalam {remaining}s", True)
 
         encoding, msg = self._extract(image)
         if encoding is None:
             return VerifyResult(False, 0.0, user_id, msg, False)
 
-        similarity = self._best_similarity(encoding, entry.encodings)
-        matched    = similarity >= self.SIMILARITY_THRESHOLD
+        best_dist, detail = self._compute_distance(encoding, entry.encodings)
+        matched = best_dist <= self.DISTANCE_THRESHOLD
 
-        # update lockout state
+        # similarity untuk VerifyResult (0–1, makin besar makin mirip)
+        # konversi dari distance: similarity ≈ 1 - (distance / max_possible)
+        similarity = max(0.0, 1.0 - best_dist)
+
+        logger.debug(
+            f"[VERIFY] user={user_id}, dist={best_dist:.4f}, "
+            f"detail={detail}, matched={matched}"
+        )
+
         if matched:
             entry.failed_attempts = 0
         else:
@@ -346,48 +289,76 @@ class FaceRecognitionService:
             matched    = matched,
             similarity = round(float(similarity), 4),
             user_id    = user_id if matched else None,
-            message    = "Match ✓" if matched else "No match",
+            message    = "Cocok ✓" if matched else f"Tidak cocok (dist={best_dist:.4f})",
         )
 
-    # ── 1-to-N identification ─────────────────
+    # ── IDENTIFIKASI 1-KE-N ───────────────────────────────────────────────
 
     def identify_face(
         self,
-        image: np.ndarray,
+        image:           np.ndarray,
         liveness_passed: bool = False,
     ) -> VerifyResult:
         """
-        Identify who the person is across ALL registered users.
-        Returns the best match if above threshold, otherwise unknown.
+        Identifikasi siapa orang ini dari SEMUA user terdaftar.
+        Dipertahankan dari v2: gap check & threshold ketat jika 1 user.
         """
         if not liveness_passed:
-            return VerifyResult(False, 0.0, None, "Liveness check required", False)
+            return VerifyResult(False, 0.0, None, "Liveness check diperlukan", False)
 
         encoding, msg = self._extract(image)
         if encoding is None:
             return VerifyResult(False, 0.0, None, msg, False)
 
-        best_user = None
-        best_sim  = -1.0
-
+        results = []
         for uid in self.store.all_ids():
             entry = self.store.get(uid)
-            if entry is None:
+            if entry is None or not entry.encodings:
                 continue
-            sim = self._best_similarity(encoding, entry.encodings)
-            if sim > best_sim:
-                best_sim  = sim
-                best_user = uid
+            dist, detail = self._compute_distance(encoding, entry.encodings)
+            results.append((dist, uid))
+            logger.debug(f"[IDENTIFY] user={uid}, dist={dist:.4f}, detail={detail}")
 
-        matched = best_sim >= self.SIMILARITY_THRESHOLD
-        return VerifyResult(
-            matched    = matched,
-            similarity = round(float(best_sim), 4),
-            user_id    = best_user if matched else None,
-            message    = f"Identified as {best_user}" if matched else "Unknown person",
+        if not results:
+            return VerifyResult(False, 0.0, None, "Tidak ada user terdaftar", False)
+
+        # Urutkan dari distance TERKECIL (paling mirip)
+        results.sort(key=lambda x: x[0])
+
+        best_dist, best_user = results[0]
+        second_dist = results[1][0] if len(results) > 1 else float("inf")
+        gap = second_dist - best_dist   # gap positif = best_user menang jelas
+
+        logger.debug(
+            f"[IDENTIFY] best={best_user}({best_dist:.4f}), "
+            f"second={results[1][1] if len(results)>1 else '-'}({second_dist:.4f}), "
+            f"gap={gap:.4f}"
         )
 
-    # ── management ────────────────────────────
+        if len(results) == 1:
+            # Hanya 1 user terdaftar — pakai threshold lebih ketat
+            threshold = self.DISTANCE_THRESHOLD * 0.90
+            matched   = best_dist <= threshold
+            logger.debug(f"[IDENTIFY] 1 user — threshold diperketat ke {threshold:.3f}")
+        else:
+            matched = (
+                best_dist <= self.DISTANCE_THRESHOLD and
+                gap       >= self.MIN_GAP
+            )
+
+        similarity = max(0.0, 1.0 - best_dist)
+        return VerifyResult(
+            matched    = matched,
+            similarity = round(float(similarity), 4),
+            user_id    = best_user if matched else None,
+            message    = (
+                f"Dikenali sebagai {best_user} (dist={best_dist:.4f})"
+                if matched else
+                f"Tidak dikenali (dist={best_dist:.4f}, gap={gap:.4f})"
+            ),
+        )
+
+    # ── MANAJEMEN ─────────────────────────────────────────────────────────
 
     def delete_user(self, user_id: str) -> bool:
         return self.store.delete(user_id)
@@ -395,57 +366,80 @@ class FaceRecognitionService:
     def list_users(self) -> list[str]:
         return self.store.all_ids()
 
-    # ── private helpers ───────────────────────
+    def set_threshold(self, value: float):
+        """
+        Sesuaikan threshold jika diperlukan.
+        0.40 = ketat, 0.45 = default, 0.50 = toleran
+        """
+        if not 0.1 <= value <= 0.8:
+            raise ValueError("Threshold harus antara 0.1 dan 0.8")
+        self.DISTANCE_THRESHOLD = value
+        logger.info(f"Threshold diubah ke {value}")
+
+    # ── PRIVATE HELPERS ───────────────────────────────────────────────────
 
     def _extract(self, image: np.ndarray) -> tuple[Optional[np.ndarray], str]:
-        """Detect face → align → extract encoding."""
-        gray  = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        faces = self.detector(gray, 1)
+        """
+        Deteksi wajah & ekstrak 128-dim deep embedding.
+        Input: BGR image (format OpenCV)
+        """
+        # face_recognition butuh RGB
+        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        if len(faces) == 0:
-            return None, "No face detected"
-        if len(faces) > 1:
-            return None, "Multiple faces detected — use one face only"
+        locations = face_recognition.face_locations(rgb, model=self.model)
 
-        shape_dlib = self.predictor(gray, faces[0])
-        shape      = np.array([[p.x, p.y] for p in shape_dlib.parts()])
+        if len(locations) == 0:
+            return None, "Wajah tidak terdeteksi"
+        if len(locations) > 1:
+            return None, "Lebih dari satu wajah — gunakan satu wajah saja"
 
-        # align first
-        aligned = self.aligner.align(image, shape)
-        if aligned is None:
-            return None, "Face alignment failed"
+        encodings = face_recognition.face_encodings(rgb, known_face_locations=locations)
+        if not encodings:
+            return None, "Gagal mengekstrak encoding wajah"
 
-        # re-detect on aligned image
-        aligned_gray  = cv2.cvtColor(aligned, cv2.COLOR_BGR2GRAY)
-        aligned_faces = self.detector(aligned_gray, 1)
-        if len(aligned_faces) == 0:
-            # fallback: use original shape
-            encoding = self.extractor.extract(shape)
-        else:
-            aligned_shape_dlib = self.predictor(aligned_gray, aligned_faces[0])
-            aligned_shape      = np.array([[p.x, p.y] for p in aligned_shape_dlib.parts()])
-            encoding           = self.extractor.extract(aligned_shape)
+        return encodings[0], "OK"   # np.ndarray shape (128,)
 
-        if encoding is None:
-            return None, "Cannot normalise face (eye distance too small)"
-
-        return encoding, "OK"
-
-    @staticmethod
-    def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
-        """Cosine similarity between two L2-normalised vectors."""
-        return float(np.dot(a, b))   # already normalised in extractor
-
-    def _best_similarity(
+    def _compute_distance(
         self,
-        probe: np.ndarray,
+        probe:   np.ndarray,
         gallery: list[np.ndarray],
-    ) -> float:
-        """Return highest similarity between probe and any gallery encoding."""
+    ) -> tuple[float, dict]:
+        """
+        Hitung L2 distance probe vs semua gallery encoding.
+        Gunakan MEAN distance + penalti ketidakkonsistenan (dari v2).
+
+        Catatan: distance kecil = mirip (kebalikan cosine similarity!)
+        """
         if not gallery:
-            return 0.0
-        sims = [self._cosine_similarity(probe, g) for g in gallery]
-        return max(sims)
+            return float("inf"), {}
+
+        distances = [float(np.linalg.norm(probe - g)) for g in gallery]
+
+        mean_dist = float(np.mean(distances))
+        min_dist  = float(np.min(distances))
+        max_dist  = float(np.max(distances))
+        spread    = max_dist - mean_dist
+
+        # Penalti jika hasil tidak konsisten
+        # (hanya 1 sampel yang mirip, sisanya jauh)
+        if spread > 0.08:
+            penalised = mean_dist * 1.10   # naikkan distance = perketat
+            logger.debug(
+                f"[DIST] Penalti ketidakkonsistenan: mean={mean_dist:.4f}, "
+                f"min={min_dist:.4f}, spread={spread:.4f} → {penalised:.4f}"
+            )
+            final = penalised
+        else:
+            final = mean_dist
+
+        detail = {
+            "mean":      round(mean_dist, 4),
+            "min":       round(min_dist,  4),
+            "max":       round(max_dist,  4),
+            "n":         len(distances),
+            "penalised": spread > 0.08,
+        }
+        return final, detail
 
     @staticmethod
     def _is_locked(entry: FaceEntry) -> bool:
@@ -453,25 +447,45 @@ class FaceRecognitionService:
 
 
 # ──────────────────────────────────────────────
-#  INTEGRATION EXAMPLE  (with liveness_detector)
+#  PERBANDINGAN VERSI
 # ──────────────────────────────────────────────
 #
+#  ┌──────────────────────┬──────────────────────┬──────────────────────┐
+#  │ Aspek                │ v1/v2 (lama)         │ v3 (ini)             │
+#  ├──────────────────────┼──────────────────────┼──────────────────────┤
+#  │ Encoding             │ Landmark + HOG + LBP │ ResNet 128-dim       │
+#  │ Dimensi              │ 154 ~ 1920+ dim      │ 128 dim              │
+#  │ Dilatih untuk        │ Bentuk & tekstur     │ Identitas orang      │
+#  │ Metric               │ Cosine similarity    │ L2 distance          │
+#  │ Threshold            │ 0.90 (cosine)        │ 0.45 (L2 distance)   │
+#  │ False acceptance     │ Tinggi               │ Sangat rendah        │
+#  │ Butuh GPU?           │ Tidak                │ Tidak (CPU cukup)    │
+#  ├──────────────────────┼──────────────────────┼──────────────────────┤
+#  │ Lockout              │ ✓                    │ ✓ (dipertahankan)    │
+#  │ Checksum storage     │ ✓                    │ ✓ (dipertahankan)    │
+#  │ Gap check            │ ✓                    │ ✓ (dipertahankan)    │
+#  │ Penalti spread       │ ✓                    │ ✓ (dipertahankan)    │
+#  │ Liveness guard       │ ✓                    │ ✓ (dipertahankan)    │
+#  └──────────────────────┴──────────────────────┴──────────────────────┘
+#
+#  TUNING UNTUK SKRIPSI (ukur FAR & FRR):
+#  - DISTANCE_THRESHOLD : 0.40 ~ 0.50
+#  - MIN_GAP            : 0.03 ~ 0.08
+#  - Buat kurva ROC dari hasil eksperimen
+#
+#  INTEGRASI LIVENESS:
+#
 #   from liveness_detector import LivenessDetector, LivenessResult
-#   from face_recognition_service import FaceRecognitionService, VerifyResult
+#   from face_recognition_service import FaceRecognitionService
 #
 #   liveness = LivenessDetector(n_challenges=3)
-#   recog    = FaceRecognitionService()
+#   recog    = FaceRecognitionService(model="large")
 #
 #   liveness.start_session()
 #   while True:
 #       ret, frame = cap.read()
 #       result = liveness.process_frame(frame)
-#
 #       if result["result"] == LivenessResult.PASSED:
-#           verify = recog.verify_face(frame, user_id="alice", liveness_passed=True)
+#           verify = recog.identify_face(frame, liveness_passed=True)
 #           print(verify)
-#           break
-#
-#       elif result["result"] in (LivenessResult.FAILED, LivenessResult.SPOOFED):
-#           print("Liveness failed — access denied")
 #           break

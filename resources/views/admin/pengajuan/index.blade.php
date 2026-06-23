@@ -118,7 +118,7 @@
                                 <span class="font-mono" style="color:var(--text-light);font-size:0.78rem;">{{ $key + 1 }}</span>
                             </td>
                             <td>
-                                <span style="font-weight:600;font-size:0.875rem;">{{ $item->user->nama }}</span>
+                                <span style="font-weight:600;font-size:0.875rem;">{{ $item->user?->nama ?? 'User tidak ditemukan' }}</span>
                             </td>
                             <td>
                                 @if($item->jenis == 'izin')
@@ -186,7 +186,7 @@
                                                 @csrf
                                                 <div class="modal-body">
                                                     <div class="mb-1" style="font-size:0.82rem;color:var(--text-muted);">
-                                                        Pengajuan dari <strong style="color:var(--text);">{{ $item->user->nama }}</strong>
+                                                        Pengajuan dari <strong style="color:var(--text);">{{ $item->user?->nama ?? 'User tidak ditemukan' }}</strong>
                                                     </div>
                                                     <div class="mb-3">
                                                         <label class="form-label">Alasan Penolakan</label>

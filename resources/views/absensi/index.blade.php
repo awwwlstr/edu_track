@@ -18,12 +18,14 @@
 
             {{-- CONTENT --}}
             <div class="card-body text-center position-relative" style="z-index:2;">
-                <h3 class="mb-2 fw-bold" style="color:#1B6B3A;">
+                <h3 class="mb-2 fw-bold" style="color:#1e3a8a">
                     <i class="fas fa-chalkboard-teacher me-2"></i>Dashboard Absensi
                 </h3>
 
                 <p class="mb-0 text-muted">
-                    Hai <strong style="color:#1B6B3A;">{{ auth()->user()->nama }}</strong> 👋  
+                    Hai <strong style="color:#1e3a8a">{{ auth()->user()->nama }}</strong> 👋  
+                </p>
+                <p class="mb-0 text-muted">
                     Yuk cek kehadiran<br>
                     Tetap semangat mengajar hari ini! 🤗
                 </p>
@@ -32,168 +34,165 @@
         </div>
     </div>
 </div>
-    <!-- Alerts -->
-    @if(session('success'))
-        <div class="alert alert-success alert-dismissible fade show" role="alert">
-            <i class="fas fa-check-circle"></i> {{ session('success') }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-    @endif
-    @if(session('error'))
-        <div class="alert alert-danger alert-dismissible fade show" role="alert">
-            <i class="fas fa-exclamation-circle"></i> {{ session('error') }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-    @endif
 
-    <!-- Jam & Tanggal -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card card-custom bg-light">
-                <div class="card-body text-center">
-                    <div id="date" class="text-muted mb-2"></div>
-                    <div id="clock" class="clock"></div>
-                </div>
-            </div>
-        </div>
+<!-- Alerts -->
+@if(session('success'))
+    <div class="alert alert-success alert-dismissible fade show" role="alert">
+        <i class="fas fa-check-circle"></i> {{ session('success') }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
-
-    <!-- Status Absensi Hari Ini -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card card-custom">
-                <div class="card-header bg-primary text-white">
-                    <h5 class="mb-0"><i class="fas fa-info-circle"></i> Status Absensi Hari Ini</h5>
-                </div>
-                <div class="card-body">
-                    @if($absensiHariIni)
-                        <div class="row">
-                            <div class="col-md-6">
-                                <p><strong>Status:</strong>
-                                    @if($absensiHariIni->status == 'hadir')
-                                        <span class="badge bg-success">Hadir</span>
-                                    @elseif($absensiHariIni->status == 'terlambat')
-                                        <span class="badge bg-warning">Terlambat</span>
-                                    @elseif($absensiHariIni->status == 'izin')
-                                        <span class="badge bg-info">Izin</span>
-                                    @elseif($absensiHariIni->status == 'sakit')
-                                        <span class="badge bg-secondary">Sakit</span>
-                                    @endif
-                                </p>
-                                <p><strong>Jam Masuk:</strong> {{ $absensiHariIni->jam_masuk ?? '-' }}</p>
-                            </div>
-                            <div class="col-md-6">
-                                <p><strong>Jam Keluar:</strong> {{ $absensiHariIni->jam_keluar ?? 'Belum absen keluar' }}</p>
-                                @if($absensiHariIni->keterangan)
-                                    <p><strong>Keterangan:</strong> {{ $absensiHariIni->keterangan }}</p>
-                                @endif
-                            </div>
-                        </div>
-                    @else
-                        <p class="text-center text-muted">Anda belum melakukan absensi hari ini.</p>
-                    @endif
-                </div>
-            </div>
-        </div>
+@endif
+@if(session('error'))
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        <i class="fas fa-exclamation-circle"></i> {{ session('error') }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
+@endif
 
-    <!-- Tombol Absensi -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card card-custom">
-                <div class="card-header bg-success text-white">
-                    <h5 class="mb-0"><i class="fas fa-hand-pointer"></i> Tombol Absensi</h5>
-                </div>
-                <div class="card-body">
-                    <div class="row g-3">
-
-                        <div class="col-md-3 col-6">
-                            <button type="button"
-                                class="btn btn-primary btn-custom w-100"
-                                onclick="startAbsensi('masuk')"
-                                @if($absensiHariIni) disabled @endif>
-                                <i class="fas fa-sign-in-alt fa-2x d-block mb-2"></i>
-                                <strong>MASUK</strong>
-                            </button>
-                        </div>
-
-                        <div class="col-md-3 col-6">
-                            <button type="button"
-                                class="btn btn-warning btn-custom w-100"
-                                onclick="startAbsensi('keluar')"
-                                @if(!$absensiHariIni || $absensiHariIni->jam_keluar) disabled @endif>
-                                <i class="fas fa-sign-out-alt fa-2x d-block mb-2"></i>
-                                <strong>KELUAR</strong>
-                            </button>
-                        </div>
-
-                        <div class="col-md-3 col-6">
-                            <button type="button" class="btn btn-info btn-custom w-100"
-                                data-bs-toggle="modal" data-bs-target="#modalIzin"
-                                @if($absensiHariIni) disabled @endif>
-                                <i class="fas fa-envelope fa-2x d-block mb-2"></i>
-                                <strong>IZIN</strong>
-                            </button>
-                        </div>
-
-                        <div class="col-md-3 col-6">
-                            <button type="button" class="btn btn-secondary btn-custom w-100"
-                                data-bs-toggle="modal" data-bs-target="#modalSakit"
-                                @if($absensiHariIni) disabled @endif>
-                                <i class="fas fa-medkit fa-2x d-block mb-2"></i>
-                                <strong>SAKIT</strong>
-                            </button>
-                        </div>
-
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Statistik Bulan Ini -->
-    <div class="row">
-        <div class="col-12">
-            <h4 class="mb-3"><i class="fas fa-chart-bar"></i> Statistik Bulan Ini ({{ date('F Y') }})</h4>
-        </div>
-        <div class="col-md-3 col-6 mb-3">
-            <div class="card card-custom stat-card hadir">
-                <div class="card-body">
-                    <h6 class="text-muted">Hadir</h6>
-                    <h2 class="text-success">{{ $stats['hadir'] }}</h2>
-                    <small>hari</small>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3 col-6 mb-3">
-            <div class="card card-custom stat-card izin">
-                <div class="card-body">
-                    <h6 class="text-muted">Izin</h6>
-                    <h2 class="text-warning">{{ $stats['izin'] }}</h2>
-                    <small>hari</small>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3 col-6 mb-3">
-            <div class="card card-custom stat-card sakit">
-                <div class="card-body">
-                    <h6 class="text-muted">Sakit</h6>
-                    <h2 class="text-info">{{ $stats['sakit'] }}</h2>
-                    <small>hari</small>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3 col-6 mb-3">
-            <div class="card card-custom stat-card alpha">
-                <div class="card-body">
-                    <h6 class="text-muted">Total Kehadiran</h6>
-                    <h2 class="text-primary">{{ $stats['hadir'] + $stats['izin'] + $stats['sakit'] }}</h2>
-                    <small>hari</small>
-                </div>
+<!-- Jam & Tanggal -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card card-custom bg-light">
+            <div class="card-body text-center">
+                <div id="date" class="text-muted mb-2"></div>
+                <div id="clock" class="clock"></div>
             </div>
         </div>
     </div>
 </div>
+
+<!-- Status Absensi Hari Ini -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card card-custom">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-info-circle"></i> Status Absensi Hari Ini</h5>
+            </div>
+            <div class="card-body">
+                @if($absensiHariIni)
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p><strong>Status:</strong>
+                                @if($absensiHariIni->status == 'hadir')
+                                    <span class="badge bg-success">Hadir</span>
+                                @elseif($absensiHariIni->status == 'terlambat')
+                                    <span class="badge bg-warning">Terlambat</span>
+                                @elseif($absensiHariIni->status == 'izin')
+                                    <span class="badge bg-info">Izin</span>
+                                @elseif($absensiHariIni->status == 'sakit')
+                                    <span class="badge bg-secondary">Sakit</span>
+                                @endif
+                            </p>
+                            <p><strong>Jam Masuk:</strong> {{ $absensiHariIni->jam_masuk ?? '-' }}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <p><strong>Jam Keluar:</strong> {{ $absensiHariIni->jam_keluar ?? 'Belum absen keluar' }}</p>
+                            @if($absensiHariIni->keterangan)
+                                <p><strong>Keterangan:</strong> {{ $absensiHariIni->keterangan }}</p>
+                            @endif
+                        </div>
+                    </div>
+                @else
+                    <p class="text-center text-muted">Anda belum melakukan absensi hari ini.</p>
+                @endif
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tombol Absensi -->
+<div class="card mb-4">
+        <div class="card-header d-flex align-items-center gap-2">
+            <i class="fas fa-hand-pointer text-green"></i>
+            <h5 class="mb-0">Tombol Absensi</h5>
+        </div>
+        <div class="card-body p-4">
+            <div class="row g-3">
+                <div class="col-md-3 col-6">
+                    <button type="button"
+                            class="btn btn-primary btn-custom w-100"
+                            onclick="startAbsensi('masuk')"
+                            @if($absensiHariIni) disabled @endif>
+                        <i class="fas fa-sign-in-alt fa-2x d-block mb-2"></i>
+                        <strong>MASUK</strong>
+                    </button>
+                </div>
+                <div class="col-md-3 col-6">
+                    <button type="button"
+                            class="btn btn-warning btn-custom w-100"
+                            onclick="startAbsensi('keluar')"
+                            @if(!$absensiHariIni || $absensiHariIni->jam_keluar) disabled @endif>
+                        <i class="fas fa-sign-out-alt fa-2x d-block mb-2"></i>
+                        <strong>KELUAR</strong>
+                    </button>
+                </div>
+                <div class="col-md-3 col-6">
+                    <button type="button"
+                            class="btn btn-info btn-custom w-100"
+                            data-bs-toggle="modal" data-bs-target="#modalIzin"
+                            @if($absensiHariIni) disabled @endif>
+                        <i class="fas fa-envelope fa-2x d-block mb-2"></i>
+                        <strong>IZIN</strong>
+                    </button>
+                </div>
+                <div class="col-md-3 col-6">
+                    <button type="button"
+                            class="btn btn-secondary btn-custom w-100"
+                            data-bs-toggle="modal" data-bs-target="#modalSakit"
+                            @if($absensiHariIni) disabled @endif>
+                        <i class="fas fa-medkit fa-2x d-block mb-2"></i>
+                        <strong>SAKIT</strong>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+ {{-- Statistik Bulan Ini --}}
+    <div class="page-header">
+        <div class="page-title" style="font-size: 16px;">
+            <i class="fas fa-chart-bar me-2 text-green"></i>Statistik Bulan Ini
+            <span style="font-size: 13px; font-weight: 500; color: var(--gray-400); margin-left: 6px;">
+                ({{ date('F Y') }})
+            </span>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-3 col-6">
+            <div class="stat-card hadir">
+                <div class="stat-label"><i class="fas fa-check-circle me-1"></i>Hadir</div>
+                <div class="stat-value" style="color: var(--color-hadir);">{{ $stats['hadir'] }}</div>
+                <small style="color: var(--gray-400); font-size: 11px;">hari</small>
+            </div>
+        </div>
+        <div class="col-md-3 col-6">
+            <div class="stat-card izin">
+                <div class="stat-label"><i class="fas fa-file-alt me-1"></i>Izin</div>
+                <div class="stat-value" style="color: var(--color-izin);">{{ $stats['izin'] }}</div>
+                <small style="color: var(--gray-400); font-size: 11px;">hari</small>
+            </div>
+        </div>
+        <div class="col-md-3 col-6">
+            <div class="stat-card sakit">
+                <div class="stat-label"><i class="fas fa-heartbeat me-1"></i>Sakit</div>
+                <div class="stat-value" style="color: var(--color-sakit);">{{ $stats['sakit'] }}</div>
+                <small style="color: var(--gray-400); font-size: 11px;">hari</small>
+            </div>
+        </div>
+        <div class="col-md-3 col-6">
+            <div class="stat-card" style="border-left-color: var(--teal-500);">
+                <div class="stat-label"><i class="fas fa-calendar-check me-1"></i>Total Kehadiran</div>
+                <div class="stat-value" style="color: var(--teal-500);">
+                    {{ $stats['hadir'] + $stats['izin'] + $stats['sakit'] }}
+                </div>
+                <small style="color: var(--gray-400); font-size: 11px;">hari</small>
+            </div>
+        </div>
+    </div>
+
+</div>
+
 
 <!-- Modal Izin -->
 <div class="modal fade" id="modalIzin" tabindex="-1">
@@ -260,7 +259,7 @@
                         style="border-radius:8px; background:#000; object-fit:cover;"
                         autoplay playsinline muted></video>
                     <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-                        width:180px; height:220px; border:3px solid rgba(0,255,0,0.6);
+                        width:180px; height:220px; border:3px solid rgba(0, 72, 255, 0.6);
                         border-radius:50%; pointer-events:none;"></div>
                 </div>
                 <canvas id="canvasKamera" style="display:none;"></canvas>
@@ -289,8 +288,7 @@
     </div>
 </div>
 
-
-    <div id="user-data"
+<div id="user-data"
     data-user-id="{{ auth()->user()->nip }}"
     data-csrf="{{ csrf_token() }}"
     style="display:none;"></div>
@@ -309,12 +307,14 @@ let currentLat    = null;
 let currentLng    = null;
 let livenessTimer = null;
 let modalInstance = null;
+let sessionId     = null;   // ← FIX: simpan session_id dari /liveness/start
 
 // ── Mulai absensi ─────────────────────────────────────────────
 async function startAbsensi(tipe) {
     tipeAbsensi = tipe;
     livenessOk  = false;
     photoData   = null;
+    sessionId   = null;     // ← reset session setiap kali mulai absensi baru
 
     document.getElementById('judulModal').innerHTML =
         tipe === 'masuk'
@@ -348,9 +348,13 @@ async function startAbsensi(tipe) {
                 });
                 document.getElementById('videoKamera').srcObject = stream;
 
-                // ── Mulai sesi liveness di Python API ──
-                await fetch(PYTHON_API + '/liveness/start', { method: 'POST' });
-
+                // ── FIX: simpan session_id dari response /liveness/start ──
+                const startRes  = await fetch(PYTHON_API + '/liveness/start', { method: 'POST' });
+                if (!startRes.ok) throw new Error('Gagal memulai sesi liveness (HTTP ' + startRes.status + ')');
+                const startData = await startRes.json();
+                sessionId       = startData.session_id;
+                console.log('Response start:', startData);      // ← tambah ini
+                console.log('Session ID:', sessionId);          // ← tambah ini
                 setStatus('info', '<i class="fas fa-eye"></i> Ikuti instruksi yang muncul...');
                 startLivenessDetection();
             } catch (e) {
@@ -377,10 +381,11 @@ function startLivenessDetection() {
         const frameBase64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
 
         try {
-            const res  = await fetch(PYTHON_API + '/liveness/process', {
+            const res = await fetch(PYTHON_API + '/liveness/process', {
                 method:  'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body:    JSON.stringify({ frame: frameBase64 })
+                // ── FIX: sertakan session_id di setiap frame ──
+                body:    JSON.stringify({ session_id: sessionId, frame: frameBase64 })
             });
 
             if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -454,14 +459,14 @@ async function prosesAbsensi() {
     setStatus('info', '<i class="fas fa-spinner fa-spin"></i> Mencocokkan wajah...');
 
     try {
-        // ── verifikasi wajah (kirim liveness_passed: true) ──
+        // ── FIX: sertakan session_id (sudah passed) ke /face/verify ──
         const faceRes = await fetch(PYTHON_API + '/face/verify', {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify({
-                frame:           photoData,
-                user_id:         currentUserId,
-                liveness_passed: true           // ← wajib setelah liveness OK
+                session_id: sessionId,      // ← wajib, dan harus sudah passed
+                frame:      photoData,
+                user_id:    currentUserId
             })
         });
 
@@ -527,6 +532,7 @@ function tutupModal() {
     if (livenessTimer) clearInterval(livenessTimer);
     if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
     if (modalInstance) modalInstance.hide();
+    sessionId = null;   // ← reset session saat modal ditutup
     resetBtn();
 }
 
@@ -565,4 +571,4 @@ updateClock();
 
 </script>
 
-@endsection  
+@endsection

@@ -42,33 +42,62 @@ class AuthController extends Controller
     public function registerProses(Request $request)
     {
         $request->validate([
-            'nama'     => 'required',
-            'nip'      => 'required|unique:users',
-            'email'    => 'required|email|unique:users',
-            'password' => 'required|min:6',
-            'foto'     => 'required|image|mimes:jpg,jpeg,png'
-            // role dihapus dari validasi
+            'nama'        => 'required',
+            'nip'         => 'required|unique:users',
+            'email'       => 'required|email|unique:users',
+            'password'    => 'required|min:6',
+            'foto'        => 'nullable|image|mimes:jpg,jpeg,png',
+            'foto_base64' => 'required',
         ]);
 
-        // buat nama file
-        $namaFile = $request->nip . '.jpg';
+        // =========================
+        // FOTO WAJAH (DATASET)
+        // =========================
+        $pathDataset = public_path('dataset');
 
-        // simpan ke folder dataset
-        $path = public_path('dataset');
-
-        if (!file_exists($path)) {
-            mkdir($path, 0777, true);
+        if (!file_exists($pathDataset)) {
+            mkdir($pathDataset, 0755, true);
         }
 
-        $request->file('foto')->move($path, $namaFile);
+        $namaFileWajah = $request->nip . '.jpg';
 
+        if ($request->filled('foto_base64')) {
+            $base64 = explode(',', $request->foto_base64);
+            $image  = base64_decode(end($base64));
+
+            file_put_contents(
+                $pathDataset . '/' . $namaFileWajah,
+                $image
+            );
+        }
+
+        // =========================
+        // FOTO PROFIL
+        // =========================
+        $namaFileProfil = null;
+
+        if ($request->hasFile('foto') && $request->file('foto')->isValid()) {
+            $file = $request->file('foto');
+
+            $namaFileProfil = time() . '_' . $request->nip . '.' . $file->getClientOriginalExtension();
+
+            $tersimpan = $file->move(public_path('fotoprofil'), $namaFileProfil); // ✅ fix: $ bukan $$
+
+            if (!$tersimpan) {
+                return back()->with('error', 'Gagal menyimpan foto profil');
+            }
+        }
+
+        // =========================
+        // USER CREATE
+        // =========================
         Users::create([
             'nama'     => $request->nama,
             'nip'      => $request->nip,
             'email'    => $request->email,
             'password' => Hash::make($request->password),
-            'role'     => 'guru', // ← dipatenkan selalu guru
-            'foto'     => $namaFile
+            'role'     => 'guru',
+            'foto'     => $namaFileProfil,
         ]);
 
         return redirect('/login')->with('success', 'Registrasi berhasil');
@@ -77,8 +106,10 @@ class AuthController extends Controller
     public function logout(Request $request)
     {
         Auth::logout();
+
         $request->session()->invalidate();
         $request->session()->regenerateToken();
-        return redirect('/login');
+
+        return redirect('/login')->with('success', 'Berhasil logout');
     }
 }
