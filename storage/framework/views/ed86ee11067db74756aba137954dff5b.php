@@ -11,19 +11,19 @@
             <div style="
                 position:absolute;
                 inset:0;
-                background-image: radial-gradient(#1B6B3A20 1px, transparent 1px);
+                background-image: radial-gradient( 1px, transparent 1px);
                 background-size: 20px 20px;
                 opacity:0.4;
             "></div>
 
             
             <div class="card-body text-center position-relative" style="z-index:2;">
-                <h3 class="mb-2 fw-bold" style="color:#1e3a8a">
+                <h3 class="mb-2 fw-bold" style="color:#15803d">
                     <i class="fas fa-chalkboard-teacher me-2"></i>Dashboard Absensi
                 </h3>
 
                 <p class="mb-0 text-muted">
-                    Hai <strong style="color:#1e3a8a"><?php echo e(auth()->user()->nama); ?></strong> 👋  
+                    Hai <strong style="color:#15803d"><?php echo e(auth()->user()->nama); ?></strong> 👋  
                 </p>
                 <p class="mb-0 text-muted">
                     Yuk cek kehadiran<br>
